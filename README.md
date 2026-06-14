@@ -1,73 +1,41 @@
 # MYCELIUM
 
-**Sovereign Local Music Intelligence System**
+**Sovereign Local Music Intelligence System v1.0**
 
-> Vocal-first. Fully local. Bloodline-locked. No gatekeepers.
+> The complete integrated stack for local, bloodline-locked music creation.
 
-MYCELIUM is the complete self-sufficient song generation system for Windows 10. Generate expressive vocals with your own fine-tuned voice, then let the mycelium grow adaptive accompaniment with natural floating BPM.
+MYCELIUM is the unifying creative interface and production-grade local music system that brings together advanced sovereign audio components into one coherent, self-improving organism.
 
-Everything runs on your machine. Your data. Your voice. Your signal.
+**Vocal-first. Fully local. Your voice at the center.**
 
 ---
 
-## What is MYCELIUM?
+## The Full Stack
 
-MYCELIUM is a production-grade, single-file creative interface + local AI backend stack designed for sovereign artists who want full control over their music generation pipeline.
+MYCELIUM integrates four complementary layers:
 
-It combines:
+- **MYCELIUM Interface** (`index.html`) — Beautiful single-file creative surface with procedural stems, vocal-first workflow, 10k custom lyrics, Mycelium lineage graph, and live mixing.
+- **SUNOKILLER** — Advanced local Suno alternative for high-quality music and singing synthesis, optimized for low-end hardware.
+- **Song-Bloom-Bando-fied-Edition** — Cognitive/hyperdimensional creative intelligence layer with active memory and self-evolving capabilities.
+- **the-ai-ear** — Real-time holistic audio perception system (emotion, music features, environment).
+- **Production Voice Workflow** — XTTS v2 + fine-tuned RVC hybrid for bloodline-locked vocal generation.
 
-- A beautiful, self-contained browser interface with real-time procedural multi-stem synthesis
-- High-quality local vocal generation (Bark, fine-tunable on your voice)
-- Adaptive accompaniment that follows the vocal's timing and energy
-- Perfect native stem separation for generated material
-- Full lineage tracking via an interactive Mycelium network graph
-
-## Core Philosophy
-
-**The voice leads. The mycelium responds.**
-
-This is not another cloud AI music tool. This is a living system you install once and grow with. The more you feed it your voice, your lyrics, and your generations, the more it becomes *yours*.
-
-## Key Features
-
-- **Vocal-First Workflow** — Generate vocals first, then grow floating, responsive accompaniment
-- **Custom Lyrics** — 10,000 character limit with Save Draft
-- **Fine-tunable Voice** — Lock the vocal model to your own timbre and style
-- **Native Stem Export** — Perfect separation (drums, bass, melody, harmony, vocal) via offline rendering
-- **4 Distinct Remix Algorithms** — Cover, Mashup, Sample, Inspo
-- **Interactive Mycelium Graph** — Visual lineage, drag nodes, graft variations
-- **Quantum Parameters** — Temperature, Nutrient Flow, Symbiosis, Fractal Coherence
-- **100% Local & Offline** after initial model downloads
-- **Single-file Interface** — No installation required for the creative surface
+All components are designed to run locally on Windows 10 after initial setup, with full data sovereignty.
 
 ## Quick Start
 
-1. Open `index.html` in Chrome or Edge
-2. Follow the detailed instructions in `LOCAL-SOVEREIGN-SETUP.md`
-3. Install the local stack via Pinokio (Bark + MusicGen + UVR)
-4. Fine-tune Bark on your voice (one-time)
-5. Start creating with vocal-first workflow
+1. Open `index.html` in Chrome or Edge.
+2. Follow `LOCAL-SOVEREIGN-SETUP.md` for the core local stack (Pinokio + XTTS/RVC + MusicGen).
+3. (Optional/Advanced) Integrate SUNOKILLER as a stronger generative backend.
+4. Explore `INTEGRATION-ARCHITECTURE.md` for how all pieces connect into one unified system.
 
-## Deliverables
+## Philosophy
 
-- `index.html` — Polished single-file creative interface
-- `LOCAL-SOVEREIGN-SETUP.md` — Complete Windows 10 end-user guide
-- `README.md` — This document
+The voice leads. The mycelium responds with floating, adaptive accompaniment. The system remembers, reflects, and evolves with you.
 
-## System Requirements
-
-- Windows 10 (64-bit)
-- 16GB+ RAM recommended
-- NVIDIA GPU with 8GB+ VRAM strongly recommended
-- Modern browser (Chrome/Edge)
-
-## License & Philosophy
-
-This system is built for sovereignty. Use it. Modify it. Feed it your signal. Grow your own forest.
-
-No subscriptions. No data exfiltration. No corporate gatekeepers.
+No cloud. No subscriptions. No gatekeepers. Your signal grows stronger over time.
 
 ---
 
-**MYCELIUM v1.0 — Released June 2026**
 **Built for those who refuse to rent their creativity.**
+**MYCELIUM v1.0 — June 2026**
