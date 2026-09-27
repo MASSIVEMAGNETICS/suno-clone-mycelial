@@ -400,19 +400,32 @@ class PersistentStore:
         old_score = row["score"]
         if old_score is not None:
             raise ValueError("experiment already scored; immutable feedback prevents accidental double-counting")
-        self.conn.execute("UPDATE experiments SET score=? WHERE experiment_id=?", (score, experiment_id))
-        self.conn.execute(
-            """
-            UPDATE arms
-            SET pulls=pulls+1,
-                reward_sum=reward_sum+?,
-                reward_sq_sum=reward_sq_sum+?,
-                updated_at=?
-            WHERE arm_key=?
-            """,
-            (score, score * score, utc_ts(), row["arm_key"]),
-        )
-        self.conn.commit()
+        with self.conn:
+            claimed = self.conn.execute(
+                """
+                UPDATE experiments
+                SET score=?
+                WHERE experiment_id=?
+                  AND score IS NULL
+                  AND status='complete'
+                  AND artifact_path IS NOT NULL AND artifact_path<>''
+                  AND artifact_sha256 IS NOT NULL AND artifact_sha256<>''
+                """,
+                (score, experiment_id),
+            )
+            if claimed.rowcount != 1:
+                raise ValueError("experiment was concurrently scored or is no longer eligible for feedback")
+            self.conn.execute(
+                """
+                UPDATE arms
+                SET pulls=pulls+1,
+                    reward_sum=reward_sum+?,
+                    reward_sq_sum=reward_sq_sum+?,
+                    updated_at=?
+                WHERE arm_key=?
+                """,
+                (score, score * score, utc_ts(), row["arm_key"]),
+            )
 
     def pairwise(self, winner_id: str, loser_id: str, source: str = "human", confidence: float = 1.0) -> str:
         if winner_id == loser_id:
@@ -433,12 +446,26 @@ class PersistentStore:
         loser_score = 0.5 - (0.5 * confidence)
         feedback_id = f"fb_{uuid.uuid4().hex[:20]}"
         with self.conn:
+            for row, score in ((winner, winner_score), (loser, loser_score)):
+                claimed = self.conn.execute(
+                    """
+                    UPDATE experiments
+                    SET score=?
+                    WHERE experiment_id=?
+                      AND score IS NULL
+                      AND status='complete'
+                      AND artifact_path IS NOT NULL AND artifact_path<>''
+                      AND artifact_sha256 IS NOT NULL AND artifact_sha256<>''
+                    """,
+                    (score, row["experiment_id"]),
+                )
+                if claimed.rowcount != 1:
+                    raise ValueError("pairwise experiment was concurrently scored or is no longer eligible")
             self.conn.execute(
                 "INSERT INTO pairwise_feedback VALUES(?,?,?,?,?,?,?)",
                 (feedback_id, winner["song_id"], winner_id, loser_id, source, confidence, utc_ts()),
             )
             for row, score in ((winner, winner_score), (loser, loser_score)):
-                self.conn.execute("UPDATE experiments SET score=? WHERE experiment_id=?", (score, row["experiment_id"]))
                 self.conn.execute(
                     """
                     UPDATE arms

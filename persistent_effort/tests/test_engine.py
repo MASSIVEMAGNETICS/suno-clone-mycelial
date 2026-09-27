@@ -106,6 +106,45 @@ class PersistentEffortTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.apply_score(exp, 0.9)
 
+    def test_interleaved_scalar_score_cannot_double_count_arm(self):
+        song = self.store.ingest_song(self.song_file, "owned")
+        key, params = self.store.choose_arm_ucb()
+        exp = self.store.create_experiment(
+            song_id=song.song_id,
+            arm_key=key,
+            seed=1,
+            task_type="text2music",
+            prompt="x",
+            lyrics="",
+            params=params,
+        )
+        artifact = self.root / "race.wav"
+        artifact.write_bytes(b"audio")
+        self.store.mark_complete(exp, {"result": []}, artifact)
+        rival = PersistentStore(self.db)
+        original_get = self.store.get_experiment
+        injected = False
+
+        def interleaved_get(experiment_id):
+            nonlocal injected
+            row = original_get(experiment_id)
+            if not injected:
+                injected = True
+                rival.apply_score(experiment_id, 0.2)
+            return row
+
+        try:
+            with patch.object(self.store, "get_experiment", side_effect=interleaved_get):
+                with self.assertRaises(ValueError):
+                    self.store.apply_score(exp, 0.8)
+        finally:
+            rival.close()
+
+        row = self.store.get_experiment(exp)
+        arm = self.store.conn.execute("SELECT pulls,reward_sum FROM arms WHERE arm_key=?", (key,)).fetchone()
+        self.assertEqual(row["score"], 0.2)
+        self.assertEqual((arm["pulls"], arm["reward_sum"]), (1, 0.2))
+
     def test_score_rejects_unfinished_or_artifactless_experiment(self):
         song = self.store.ingest_song(self.song_file, "owned")
         key, params = self.store.choose_arm_ucb()
@@ -164,6 +203,44 @@ class PersistentEffortTests(unittest.TestCase):
         arm_b = self.store.conn.execute("SELECT pulls,reward_sum FROM arms WHERE arm_key=?", (key_b,)).fetchone()
         self.assertEqual((arm_a["pulls"], arm_a["reward_sum"]), (1, 1.0))
         self.assertEqual((arm_b["pulls"], arm_b["reward_sum"]), (1, 0.0))
+
+    def test_interleaved_scalar_score_aborts_pairwise_atomically(self):
+        song = self.store.ingest_song(self.song_file, "owned")
+        key_a, params_a = self.store.choose_arm_ucb()
+        exp_a = self.store.create_experiment(song_id=song.song_id, arm_key=key_a, seed=1, task_type="text2music", prompt="a", lyrics="", params=params_a)
+        key_b, params_b = self.store.choose_arm_ucb()
+        exp_b = self.store.create_experiment(song_id=song.song_id, arm_key=key_b, seed=2, task_type="text2music", prompt="b", lyrics="", params=params_b)
+        artifact_a = self.root / "race-a.wav"
+        artifact_b = self.root / "race-b.wav"
+        artifact_a.write_bytes(b"a")
+        artifact_b.write_bytes(b"b")
+        self.store.mark_complete(exp_a, {"result": []}, artifact_a)
+        self.store.mark_complete(exp_b, {"result": []}, artifact_b)
+        rival = PersistentStore(self.db)
+        original_get = self.store.get_experiment
+        reads = 0
+
+        def interleaved_get(experiment_id):
+            nonlocal reads
+            row = original_get(experiment_id)
+            reads += 1
+            if reads == 2:
+                rival.apply_score(exp_a, 0.3)
+            return row
+
+        try:
+            with patch.object(self.store, "get_experiment", side_effect=interleaved_get):
+                with self.assertRaises(ValueError):
+                    self.store.pairwise(exp_a, exp_b)
+        finally:
+            rival.close()
+
+        self.assertEqual(self.store.get_experiment(exp_a)["score"], 0.3)
+        self.assertIsNone(self.store.get_experiment(exp_b)["score"])
+        self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM pairwise_feedback").fetchone()[0], 0)
+        arm_a = self.store.conn.execute("SELECT pulls FROM arms WHERE arm_key=?", (key_a,)).fetchone()
+        arm_b = self.store.conn.execute("SELECT pulls FROM arms WHERE arm_key=?", (key_b,)).fetchone()
+        self.assertEqual((arm_a["pulls"], arm_b["pulls"]), (1, 0))
 
     def test_download_never_forwards_bearer_token_cross_origin(self):
         seen = []

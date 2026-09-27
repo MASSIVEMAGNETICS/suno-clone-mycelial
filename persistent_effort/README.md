@@ -213,7 +213,7 @@ Default artifacts:
 - Cross-origin absolute artifact URLs never receive the ACE-Step bearer token.
 - Duplicate song bytes: reuse the same canonical song identity.
 - Feedback for queued, running, failed, or artifactless experiments is rejected.
-- Duplicate scalar or pairwise scoring is rejected so one result cannot accidentally bias the learner twice.
+- Scalar and pairwise feedback claim every unscored result inside the same database transaction as the arm update; concurrent losing writers abort without changing scores, pairwise history, or learning totals.
 - Repaint without completed source: rejected.
 - Training recommendation without enough evidence: rejected by policy through `keep_searching`.
 
