@@ -59,7 +59,7 @@ That gives us five compute advantages:
 
 1. **One input song becomes reusable memory.** Its hash, rights state, path, generation history, winning seeds, and control settings survive model restarts and upgrades.
 2. **Preview before render.** Explore with short clips; spend full-song inference only on winners.
-3. **Never repeat failed search blindly.** UCB1 remembers which generation-control combinations have actually worked.
+3. **Never repeat failed search blindly.** UCB1 remembers which generation-control combinations have actually worked, and in-flight/unscored experiments reserve their arms so a synchronous batch explores distinct untried configurations before repeating one.
 4. **Repair instead of restart.** ACE-Step repaint regenerates only a failed time interval.
 5. **Sparse training only after plateau.** ACE-Step Side-Step gradient sensitivity can identify the projections that respond to the dataset; a small rank adapter is then tested against the frozen baseline.
 
@@ -107,7 +107,7 @@ python -m persistent_effort.engine score exp_abc123 0.91
 python -m persistent_effort.engine score exp_def456 0.42
 ```
 
-Or record direct preference:
+Or record direct preference. Pairwise confidence is converted into complementary winner/loser rewards so this path updates both UCB learning and adaptation evidence:
 
 ```bash
 python -m persistent_effort.engine pair exp_abc123 exp_def456
@@ -184,7 +184,7 @@ Secondary criterion: quality must not collapse when the ACE-Step base checkpoint
 
 SQLite runs in WAL mode. The important tables are:
 
-- `songs` — immutable source identity, rights state, audio metadata
+- `songs` — immutable content identity and rights state, plus the latest verified local source path and audio metadata
 - `arms` — generation-control configurations and accumulated rewards
 - `experiments` — every seed, request, result, hash, status, and score
 - `pairwise_feedback` — winner/loser judgments
@@ -206,11 +206,14 @@ Default artifacts:
 
 - Missing source song: fail closed.
 - Unauthorized rights state: reject ingest.
+- Re-ingesting identical bytes from a valid new location refreshes the durable path; conflicting rights-state relabeling is rejected.
 - ACE-Step unavailable: no experiment is falsely marked complete.
 - Backend failure: persisted as `failed` with error text.
 - Download failure: no artifact hash is committed.
+- Cross-origin absolute artifact URLs never receive the ACE-Step bearer token.
 - Duplicate song bytes: reuse the same canonical song identity.
-- Duplicate scoring: rejected so one result cannot accidentally bias the learner twice.
+- Feedback for queued, running, failed, or artifactless experiments is rejected.
+- Duplicate scalar or pairwise scoring is rejected so one result cannot accidentally bias the learner twice.
 - Repaint without completed source: rejected.
 - Training recommendation without enough evidence: rejected by policy through `keep_searching`.
 

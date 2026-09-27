@@ -250,12 +250,19 @@ class PersistentStore:
             merged_meta.update(metadata)
         row = self.conn.execute("SELECT * FROM songs WHERE sha256=?", (digest,)).fetchone()
         if row:
+            if row["rights_state"] != rights_state:
+                raise ValueError("re-ingested content must preserve its recorded rights_state")
+            self.conn.execute(
+                "UPDATE songs SET path=?, metadata_json=? WHERE sha256=?",
+                (str(path), canonical_json(merged_meta), digest),
+            )
+            self.conn.commit()
             return SongRecord(
                 song_id=row["song_id"],
                 sha256=row["sha256"],
-                path=row["path"],
+                path=str(path),
                 rights_state=row["rights_state"],
-                metadata=json.loads(row["metadata_json"]),
+                metadata=merged_meta,
             )
         song_id = f"song_{digest[:16]}"
         self.conn.execute(
@@ -273,7 +280,18 @@ class PersistentStore:
 
     def choose_arm_ucb(self, exploration: float = 1.1, allowed_models: Optional[set[str]] = None) -> tuple[str, dict[str, Any]]:
         self.ensure_default_arms()
-        rows = self.conn.execute("SELECT * FROM arms ORDER BY arm_key").fetchall()
+        rows = self.conn.execute(
+            """
+            SELECT a.*,
+                   COUNT(CASE
+                       WHEN e.score IS NULL AND e.status IN ('queued','running','complete') THEN 1
+                   END) AS reservations
+            FROM arms AS a
+            LEFT JOIN experiments AS e ON e.arm_key=a.arm_key
+            GROUP BY a.arm_key
+            ORDER BY a.arm_key
+            """
+        ).fetchall()
         candidates: list[sqlite3.Row] = []
         for row in rows:
             params = json.loads(row["params_json"])
@@ -283,18 +301,19 @@ class PersistentStore:
         if not candidates:
             raise RuntimeError("No generation arms available")
 
-        untried = [r for r in candidates if r["pulls"] == 0]
+        untried = [r for r in candidates if int(r["pulls"]) + int(r["reservations"]) == 0]
         if untried:
             row = random.choice(untried)
             return row["arm_key"], json.loads(row["params_json"])
 
-        total = sum(int(r["pulls"]) for r in candidates)
+        total = sum(int(r["pulls"]) + int(r["reservations"]) for r in candidates)
         best_row = None
         best_value = float("-inf")
         for row in candidates:
             pulls = int(row["pulls"])
-            mean = float(row["reward_sum"]) / pulls
-            bonus = exploration * math.sqrt(math.log(total + 1.0) / pulls)
+            effective_pulls = pulls + int(row["reservations"])
+            mean = float(row["reward_sum"]) / pulls if pulls else 0.0
+            bonus = exploration * math.sqrt(math.log(total + 1.0) / effective_pulls)
             value = mean + bonus
             if value > best_value:
                 best_value = value
@@ -376,6 +395,8 @@ class PersistentStore:
         if not 0.0 <= score <= 1.0:
             raise ValueError("score must be in [0,1]")
         row = self.get_experiment(experiment_id)
+        if row["status"] != "complete" or not row["artifact_path"] or not row["artifact_sha256"]:
+            raise ValueError("feedback requires a complete experiment with a committed artifact")
         old_score = row["score"]
         if old_score is not None:
             raise ValueError("experiment already scored; immutable feedback prevents accidental double-counting")
@@ -394,19 +415,41 @@ class PersistentStore:
         self.conn.commit()
 
     def pairwise(self, winner_id: str, loser_id: str, source: str = "human", confidence: float = 1.0) -> str:
+        if winner_id == loser_id:
+            raise ValueError("winner and loser must be different experiments")
         winner = self.get_experiment(winner_id)
         loser = self.get_experiment(loser_id)
         if winner["song_id"] != loser["song_id"]:
             raise ValueError("pairwise feedback must compare experiments from the same reference song")
+        for row in (winner, loser):
+            if row["status"] != "complete" or not row["artifact_path"] or not row["artifact_sha256"]:
+                raise ValueError("pairwise feedback requires two complete experiments with committed artifacts")
+            if row["score"] is not None:
+                raise ValueError("pairwise feedback requires previously unscored experiments")
         confidence = float(confidence)
         if not 0.0 < confidence <= 1.0:
             raise ValueError("confidence must be in (0,1]")
+        winner_score = 0.5 + (0.5 * confidence)
+        loser_score = 0.5 - (0.5 * confidence)
         feedback_id = f"fb_{uuid.uuid4().hex[:20]}"
-        self.conn.execute(
-            "INSERT INTO pairwise_feedback VALUES(?,?,?,?,?,?,?)",
-            (feedback_id, winner["song_id"], winner_id, loser_id, source, confidence, utc_ts()),
-        )
-        self.conn.commit()
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO pairwise_feedback VALUES(?,?,?,?,?,?,?)",
+                (feedback_id, winner["song_id"], winner_id, loser_id, source, confidence, utc_ts()),
+            )
+            for row, score in ((winner, winner_score), (loser, loser_score)):
+                self.conn.execute("UPDATE experiments SET score=? WHERE experiment_id=?", (score, row["experiment_id"]))
+                self.conn.execute(
+                    """
+                    UPDATE arms
+                    SET pulls=pulls+1,
+                        reward_sum=reward_sum+?,
+                        reward_sq_sum=reward_sq_sum+?,
+                        updated_at=?
+                    WHERE arm_key=?
+                    """,
+                    (score, score * score, utc_ts(), row["arm_key"]),
+                )
         return feedback_id
 
     def top_experiments(self, song_id: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -549,10 +592,22 @@ class AceStepClient:
         ensure_parent(destination)
         url = file_ref if file_ref.startswith("http://") or file_ref.startswith("https://") else urllib.parse.urljoin(self.base_url + "/", file_ref.lstrip("/"))
         req = urllib.request.Request(url, method="GET")
-        if self.api_key:
+        if self.api_key and self._origin(url) == self._origin(self.base_url):
             req.add_header("Authorization", f"Bearer {self.api_key}")
         with urllib.request.urlopen(req, timeout=max(self.timeout, 120.0)) as resp, destination.open("wb") as f:
             shutil.copyfileobj(resp, f)
+
+    @staticmethod
+    def _origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urllib.parse.urlsplit(url)
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+        if port is None and scheme == "https":
+            port = 443
+        elif port is None and scheme == "http":
+            port = 80
+        return scheme, host, port
 
 
 class PersistentEffortEngine:
